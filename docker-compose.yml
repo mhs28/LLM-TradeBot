@@ -1,0 +1,66 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os,sys,urllib.request;port=int(os.getenv('PORT','8000'));status=urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=2).status;sys.exit(0 if status==200 else 1)\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  ingestor:
+    build:
+      context: .
+      dockerfile: docker/base.Dockerfile
+    env_file:
+      - .env
+    command: ["sh", "-c", "python -m llm_tradebot.services.ingestor && sleep infinity"]
+    restart: unless-stopped
+
+  feature_engine:
+    build:
+      context: .
+      dockerfile: docker/base.Dockerfile
+    env_file:
+      - .env
+    command:
+      ["sh", "-c", "python -m llm_tradebot.services.feature_engine && sleep infinity"]
+    restart: unless-stopped
+
+  router:
+    build:
+      context: .
+      dockerfile: docker/base.Dockerfile
+    env_file:
+      - .env
+    command: ["sh", "-c", "python -m llm_tradebot.services.router && sleep infinity"]
+    restart: unless-stopped
+
+  trader:
+    build:
+      context: .
+      dockerfile: docker/base.Dockerfile
+    env_file:
+      - .env
+    command: ["sh", "-c", "python -m llm_tradebot.services.trader && sleep infinity"]
+    restart: unless-stopped
+
+  evaluator:
+    build:
+      context: .
+      dockerfile: docker/base.Dockerfile
+    env_file:
+      - .env
+    command: ["sh", "-c", "python -m llm_tradebot.services.evaluator && sleep infinity"]
+    restart: unless-stopped
