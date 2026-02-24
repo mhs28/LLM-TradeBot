@@ -46,6 +46,7 @@ Minimal, production-grade Python skeleton for a modular AI-agent-driven quant tr
    ```bash
    docker compose up --build
    ```
+   API is available at `http://127.0.0.1:${API_PORT}` (default `18080`).
 3. Stop:
    ```bash
    docker compose down
