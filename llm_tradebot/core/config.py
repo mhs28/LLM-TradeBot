@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     INGEST_INTERVALS: str = "5m,15m,1h"
     INGEST_WINDOW: int = 200
     BINANCE_FUTURES_WS_URL: str = "wss://fstream.binance.com/ws"
+    FEATURE_SYMBOLS: str = ""
+    FEATURE_INTERVALS: str = "5m,15m,1h"
+    FEATURE_WINDOW: int = 200
+    REGIME_TREND_THRESHOLD: float = 0.002
+    FEATURE_SNAPSHOT_PATH: str = "/app/data/feature_snapshots.jsonl"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -35,6 +40,24 @@ class Settings(BaseSettings):
         """Return normalized interval list from INGEST_INTERVALS."""
 
         return self._split_csv(self.INGEST_INTERVALS, transform=str.lower)
+
+    def feature_symbols(self) -> tuple[str, ...]:
+        """Return normalized symbols for feature generation."""
+
+        symbols = self._split_csv(self.FEATURE_SYMBOLS, transform=str.upper)
+        if symbols:
+            return symbols
+
+        ingest_symbols = self.ingest_symbols()
+        if ingest_symbols:
+            return ingest_symbols
+
+        return ("ETHUSDT",)
+
+    def feature_intervals(self) -> tuple[str, ...]:
+        """Return normalized interval list from FEATURE_INTERVALS."""
+
+        return self._split_csv(self.FEATURE_INTERVALS, transform=str.lower)
 
     @staticmethod
     def _split_csv(value: str, transform: Callable[[str], str]) -> tuple[str, ...]:

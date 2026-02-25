@@ -15,7 +15,7 @@ Minimal, production-grade Python skeleton for a modular AI-agent-driven quant tr
 
 - `llm_tradebot/core`: shared config, logging, types, and time utils.
 - `llm_tradebot/services/api`: smoke-check API service.
-- `llm_tradebot/services/*`: runnable placeholders for future pipeline modules.
+- `llm_tradebot/services/*`: runnable services for pipeline modules.
 - `llm_tradebot/skills`: placeholder skill registry.
 - `llm_tradebot/infra`: placeholder infra adapters.
 - `tests`: minimal smoke test.
@@ -69,6 +69,32 @@ Docker:
 docker compose up -d --build ingestor
 docker compose logs -f ingestor
 ```
+
+## Feature engine (Binance Futures WS snapshots)
+
+The feature engine subscribes to closed candles for `5m,15m,1h` and writes one JSON
+snapshot per line to `FEATURE_SNAPSHOT_PATH` (default `/app/data/feature_snapshots.jsonl`).
+
+Local:
+
+```bash
+export FEATURE_SYMBOLS="ETHUSDT,BTCUSDT"
+export FEATURE_INTERVALS="5m,15m,1h"
+export FEATURE_WINDOW=200
+export REGIME_TREND_THRESHOLD=0.002
+export FEATURE_SNAPSHOT_PATH="./data/feature_snapshots.jsonl"
+uv run python -m llm_tradebot.services.feature_engine
+```
+
+Docker:
+
+```bash
+docker compose up -d --build feature_engine
+docker compose logs -f feature_engine
+```
+
+In Docker Compose, snapshots are persisted via `./data:/app/data`, so the default file is
+available on the host at `./data/feature_snapshots.jsonl`.
 
 ## Make targets
 
