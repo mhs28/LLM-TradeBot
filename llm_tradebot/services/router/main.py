@@ -14,6 +14,7 @@ from llm_tradebot.core.logging import configure_logging
 _TRIGGER_INTERVAL = "5m"
 _POLL_SLEEP_S = 0.5
 _WAIT_LOG_POLL_INTERVAL = 20
+_FORCE_TARGET_ALLOWED = {-1, 0, 1}
 
 
 @dataclass(slots=True)
@@ -141,13 +142,18 @@ def _build_decision(
     state: RouterState,
     min_hold_bars: int,
     dev_threshold: float,
+    test_force_target: int | None,
 ) -> dict[str, Any]:
     bias, candidate_target, reason, inputs_used = _decide_base(
         snapshot=snapshot,
         dev_threshold=dev_threshold,
     )
+    if test_force_target is not None:
+        candidate_target = test_force_target
+        reason = "test_force_target"
+
     hold_locked = _apply_anti_churn(state=state, target=candidate_target, min_hold_bars=min_hold_bars)
-    if hold_locked:
+    if hold_locked and test_force_target is None:
         reason = "hold_lock"
 
     return {
@@ -162,6 +168,22 @@ def _build_decision(
         "inputs_used": inputs_used,
         "reason": reason,
     }
+
+
+def _resolve_test_force_target(raw_value: str, logger: logging.Logger) -> int | None:
+    value = raw_value.strip()
+    if not value:
+        return None
+
+    parsed = _as_int(value)
+    if parsed in _FORCE_TARGET_ALLOWED:
+        return parsed
+
+    logger.warning(
+        "router_invalid_test_force_target",
+        extra={"value": raw_value, "allowed": sorted(_FORCE_TARGET_ALLOWED)},
+    )
+    return None
 
 
 def _read_new_lines(path: Path, offset: int, logger: logging.Logger) -> tuple[int, list[str]]:
@@ -215,6 +237,7 @@ def main() -> int:
     min_hold_bars = max(0, settings.ROUTER_MIN_HOLD_BARS)
     dev_threshold = max(0.0, abs(settings.ROUTER_DEV_ENTRY_THRESHOLD))
     log_every_n = max(1, settings.ROUTER_LOG_EVERY_N)
+    test_force_target = _resolve_test_force_target(settings.ROUTER_TEST_FORCE_TARGET, logger)
     snapshot_path = Path(settings.ROUTER_SNAPSHOT_PATH)
 
     writer = DecisionWriter(settings.ROUTER_DECISION_PATH)
@@ -237,6 +260,7 @@ def main() -> int:
             "min_hold_bars": min_hold_bars,
             "dev_entry_threshold": dev_threshold,
             "log_every_n": log_every_n,
+            "test_force_target": test_force_target,
         },
     )
 
@@ -310,6 +334,7 @@ def main() -> int:
                     state=state,
                     min_hold_bars=min_hold_bars,
                     dev_threshold=dev_threshold,
+                    test_force_target=test_force_target,
                 )
 
                 try:
