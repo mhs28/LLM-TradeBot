@@ -57,6 +57,8 @@ services:
       dockerfile: docker/base.Dockerfile
     env_file:
       - .env
+    volumes:
+      - ./data:/app/data
     command: ["sh", "-c", "python -m llm_tradebot.services.trader && sleep infinity"]
     restart: unless-stopped
 

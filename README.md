@@ -122,6 +122,34 @@ docker compose logs -f router
 In Docker Compose, router data is persisted via `./data:/app/data`, so decisions are
 available on the host at `./data/router_decisions.jsonl`.
 
+## Trader v0 (paper execution)
+
+The trader tails router decisions and feature snapshots, matches decisions to a
+snapshot close price (`c`) by `(symbol, close_time_ms)`, and appends paper fills
+to `PAPER_TRADES_PATH` (default `/app/data/paper_trades.jsonl`).
+
+Local:
+
+```bash
+export TRADER_DECISION_PATH="./data/router_decisions.jsonl"
+export TRADER_SNAPSHOT_PATH="./data/feature_snapshots.jsonl"
+export PAPER_TRADES_PATH="./data/paper_trades.jsonl"
+export PAPER_START_BALANCE=10000
+export PAPER_FEE_RATE=0.0
+export PAPER_SYMBOLS="ETHUSDT,BTCUSDT"
+uv run python -m llm_tradebot.services.trader
+```
+
+Docker:
+
+```bash
+docker compose up -d --build trader
+docker compose logs -f trader
+```
+
+In Docker Compose, trader data is persisted via `./data:/app/data`, so paper trades
+are available on the host at `./data/paper_trades.jsonl`.
+
 ## Make targets
 
 - `make dev-api`: run API locally with reload.

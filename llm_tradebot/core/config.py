@@ -5,6 +5,9 @@ from typing import Callable
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_DEFAULT_TRADER_DECISION_PATH = "/app/data/router_decisions.jsonl"
+_DEFAULT_TRADER_SNAPSHOT_PATH = "/app/data/feature_snapshots.jsonl"
+
 
 class Settings(BaseSettings):
     """Simple application settings loaded from environment variables or a local .env file."""
@@ -30,6 +33,12 @@ class Settings(BaseSettings):
     ROUTER_DEV_ENTRY_THRESHOLD: float = 0.002
     ROUTER_LOG_EVERY_N: int = 1
     ROUTER_SYMBOLS: str = ""
+    TRADER_DECISION_PATH: str = _DEFAULT_TRADER_DECISION_PATH
+    TRADER_SNAPSHOT_PATH: str = _DEFAULT_TRADER_SNAPSHOT_PATH
+    PAPER_TRADES_PATH: str = "/app/data/paper_trades.jsonl"
+    PAPER_START_BALANCE: float = 10000.0
+    PAPER_FEE_RATE: float = 0.0
+    PAPER_SYMBOLS: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -81,6 +90,44 @@ class Settings(BaseSettings):
             return ingest_symbols
 
         return ("ETHUSDT",)
+
+    def paper_symbols(self) -> tuple[str, ...]:
+        """Return normalized symbols for paper trader decisions."""
+
+        symbols = self._split_csv(self.PAPER_SYMBOLS, transform=str.upper)
+        if symbols:
+            return symbols
+
+        return self.router_symbols()
+
+    def trader_decision_path(self) -> str:
+        """Return decision path while preserving legacy router path overrides."""
+
+        trader_path = self.TRADER_DECISION_PATH.strip()
+        router_path = self.ROUTER_DECISION_PATH.strip()
+        if trader_path and trader_path != _DEFAULT_TRADER_DECISION_PATH:
+            return trader_path
+        if router_path:
+            return router_path
+        if trader_path:
+            return trader_path
+        return _DEFAULT_TRADER_DECISION_PATH
+
+    def trader_snapshot_path(self) -> str:
+        """Return snapshot path while preserving legacy feature/router path overrides."""
+
+        trader_path = self.TRADER_SNAPSHOT_PATH.strip()
+        router_path = self.ROUTER_SNAPSHOT_PATH.strip()
+        feature_path = self.FEATURE_SNAPSHOT_PATH.strip()
+        if trader_path and trader_path != _DEFAULT_TRADER_SNAPSHOT_PATH:
+            return trader_path
+        if router_path:
+            return router_path
+        if feature_path:
+            return feature_path
+        if trader_path:
+            return trader_path
+        return _DEFAULT_TRADER_SNAPSHOT_PATH
 
     @staticmethod
     def _split_csv(value: str, transform: Callable[[str], str]) -> tuple[str, ...]:
