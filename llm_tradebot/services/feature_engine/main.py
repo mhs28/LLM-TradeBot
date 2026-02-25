@@ -168,88 +168,147 @@ def _simple_return(current: float, previous: float) -> float | None:
     return (current / previous) - 1.0
 
 
-def _compute_feature_snapshot(symbol: str, regime_threshold: float) -> dict[str, Any] | None:
+def _compute_feature_snapshot(
+    trigger_bar: Candle, regime_threshold: float
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
+    symbol = trigger_bar.symbol
     bars_5m = _BAR_BUFFERS.get((symbol, "5m"))
     bars_15m = _BAR_BUFFERS.get((symbol, "15m"))
     bars_1h = _BAR_BUFFERS.get((symbol, "1h"))
-    if bars_5m is None or bars_15m is None or bars_1h is None:
-        return None
 
-    bars_5m_seq = tuple(bars_5m)
-    bars_15m_seq = tuple(bars_15m)
-    bars_1h_seq = tuple(bars_1h)
+    bars_5m_seq = tuple(bars_5m) if bars_5m is not None else ()
+    bars_15m_seq = tuple(bars_15m) if bars_15m is not None else ()
+    bars_1h_seq = tuple(bars_1h) if bars_1h is not None else ()
 
     closes_5m = [bar.c for bar in bars_5m_seq]
     closes_15m = [bar.c for bar in bars_15m_seq]
     closes_1h = [bar.c for bar in bars_1h_seq]
 
+    bars_count = {"5m": len(bars_5m_seq), "15m": len(bars_15m_seq), "1h": len(bars_1h_seq)}
+    null_due_to_bars: dict[str, Any] = {}
+    null_due_to_data: dict[str, str] = {}
+
+    def has_bars(indicator: str, available: int, required: int) -> bool:
+        if available >= required:
+            return True
+        null_due_to_bars[indicator] = {
+            "reason": "insufficient_bars",
+            "required_bars": required,
+            "available_bars": available,
+        }
+        return False
+
+    def mark_data_null(indicator: str, reason: str) -> None:
+        if indicator not in null_due_to_bars:
+            null_due_to_data[indicator] = reason
+
     latest_close_5m = closes_5m[-1] if closes_5m else None
     latest_close_15m = closes_15m[-1] if closes_15m else None
     latest_close_1h = closes_1h[-1] if closes_1h else None
-    if latest_close_5m is None or latest_close_15m is None or latest_close_1h is None:
-        return None
 
-    ema_20_1h = _ema(closes_1h, period=20)
-    ema_50_1h = _ema(closes_1h, period=50)
-    atr_1h = _atr(bars_1h_seq, period=14)
+    ema_20_1h = _ema(closes_1h, period=20) if has_bars("ema_20_1h", len(closes_1h), 20) else None
+    ema_50_1h = _ema(closes_1h, period=50) if has_bars("ema_50_1h", len(closes_1h), 50) else None
+    atr_1h = _atr(bars_1h_seq, period=14) if has_bars("atr_1h", len(bars_1h_seq), 15) else None
 
-    ema_20_15m = _ema(closes_15m, period=20)
-    ema_50_15m = _ema(closes_15m, period=50)
-    momentum_15m = (
-        _simple_return(closes_15m[-1], closes_15m[-4]) if len(closes_15m) >= 4 else None
+    ema_20_15m = (
+        _ema(closes_15m, period=20) if has_bars("ema_20_15m", len(closes_15m), 20) else None
     )
-
-    ema_20_5m = _ema(closes_5m, period=20)
-    atr_5m = _atr(bars_5m_seq, period=14)
-    ret_5m = _log_return(closes_5m[-1], closes_5m[-2]) if len(closes_5m) >= 2 else None
-    ret_5m_3 = _log_return(closes_5m[-1], closes_5m[-4]) if len(closes_5m) >= 4 else None
-
-    required = (
-        ema_20_1h,
-        ema_50_1h,
-        atr_1h,
-        ema_20_15m,
-        ema_50_15m,
-        momentum_15m,
-        ema_20_5m,
-        atr_5m,
-        ret_5m,
-        ret_5m_3,
+    ema_50_15m = (
+        _ema(closes_15m, period=50) if has_bars("ema_50_15m", len(closes_15m), 50) else None
     )
-    if any(value is None for value in required):
-        return None
-    if latest_close_1h <= 0.0 or latest_close_15m <= 0.0 or latest_close_5m <= 0.0:
-        return None
-    if ema_20_5m == 0.0:
-        return None
+    momentum_15m: float | None = None
+    if has_bars("momentum_15m", len(closes_15m), 4):
+        momentum_15m = _simple_return(closes_15m[-1], closes_15m[-4])
+        if momentum_15m is None:
+            mark_data_null("momentum_15m", "zero_previous_close_15m")
 
-    trend_strength_1h = abs(ema_20_1h - ema_50_1h) / latest_close_1h
-    atr_pct_1h = atr_1h / latest_close_1h
-    regime_strength_15m = abs(ema_20_15m - ema_50_15m) / latest_close_15m
-    atr_pct_5m = atr_5m / latest_close_5m
+    ema_20_5m = _ema(closes_5m, period=20) if has_bars("ema_20_5m", len(closes_5m), 20) else None
+    atr_5m = _atr(bars_5m_seq, period=14) if has_bars("atr_5m", len(bars_5m_seq), 15) else None
+    ret_5m: float | None = None
+    if has_bars("ret_5m", len(closes_5m), 2):
+        ret_5m = _log_return(closes_5m[-1], closes_5m[-2])
+        if ret_5m is None:
+            mark_data_null("ret_5m", "non_positive_close_values")
 
-    trigger_bar = bars_5m_seq[-1]
-    return {
+    ret_5m_3: float | None = None
+    if has_bars("ret_5m_3", len(closes_5m), 4):
+        ret_5m_3 = _log_return(closes_5m[-1], closes_5m[-4])
+        if ret_5m_3 is None:
+            mark_data_null("ret_5m_3", "non_positive_close_values")
+
+    trend_strength_1h: float | None = None
+    atr_pct_1h: float | None = None
+    trend_dir_1h: str | None = None
+    if ema_20_1h is not None and ema_50_1h is not None:
+        trend_dir_1h = "up" if ema_20_1h > ema_50_1h else "down"
+        if latest_close_1h is not None and latest_close_1h > 0.0:
+            trend_strength_1h = abs(ema_20_1h - ema_50_1h) / latest_close_1h
+        else:
+            mark_data_null("trend_strength_1h", "non_positive_or_missing_latest_close_1h")
+    if atr_1h is not None:
+        if latest_close_1h is not None and latest_close_1h > 0.0:
+            atr_pct_1h = atr_1h / latest_close_1h
+        else:
+            mark_data_null("atr_pct_1h", "non_positive_or_missing_latest_close_1h")
+
+    regime_strength_15m: float | None = None
+    regime_15m: str | None = None
+    if ema_20_15m is not None and ema_50_15m is not None:
+        if latest_close_15m is not None and latest_close_15m > 0.0:
+            regime_strength_15m = abs(ema_20_15m - ema_50_15m) / latest_close_15m
+            regime_15m = "trend" if regime_strength_15m > regime_threshold else "range"
+        else:
+            mark_data_null("regime_15m", "non_positive_or_missing_latest_close_15m")
+
+    dev_from_ema20_5m: float | None = None
+    atr_pct_5m: float | None = None
+    if ema_20_5m is not None:
+        if latest_close_5m is not None and latest_close_5m > 0.0 and ema_20_5m != 0.0:
+            dev_from_ema20_5m = (latest_close_5m - ema_20_5m) / ema_20_5m
+        else:
+            mark_data_null("dev_from_ema20_5m", "non_positive_latest_close_5m_or_zero_ema20_5m")
+    if atr_5m is not None:
+        if latest_close_5m is not None and latest_close_5m > 0.0:
+            atr_pct_5m = atr_5m / latest_close_5m
+        else:
+            mark_data_null("atr_pct_5m", "non_positive_or_missing_latest_close_5m")
+
+    ready = {
+        "5m": all(
+            value is not None for value in (ema_20_5m, atr_5m, ret_5m, ret_5m_3, dev_from_ema20_5m, atr_pct_5m)
+        ),
+        "15m": all(value is not None for value in (ema_20_15m, ema_50_15m, momentum_15m, regime_15m)),
+        "1h": all(
+            value is not None
+            for value in (ema_20_1h, ema_50_1h, atr_1h, trend_dir_1h, trend_strength_1h, atr_pct_1h)
+        ),
+    }
+
+    snapshot = {
         "type": "feature_snapshot",
         "exchange": _EXCHANGE,
         "symbol": symbol,
         "interval": _TRIGGER_INTERVAL,
+        "open_time_ms": trigger_bar.open_time_ms,
         "close_time_ms": trigger_bar.close_time_ms,
         "event_time_ms": trigger_bar.event_time_ms,
+        "bars_count": bars_count,
+        "ready": ready,
         "ema_20_1h": ema_20_1h,
         "ema_50_1h": ema_50_1h,
-        "trend_dir_1h": "up" if ema_20_1h > ema_50_1h else "down",
+        "trend_dir_1h": trend_dir_1h,
         "trend_strength_1h": trend_strength_1h,
         "atr_pct_1h": atr_pct_1h,
         "ema_20_15m": ema_20_15m,
         "ema_50_15m": ema_50_15m,
-        "regime_15m": "trend" if regime_strength_15m > regime_threshold else "range",
+        "regime_15m": regime_15m,
         "momentum_15m": momentum_15m,
         "ret_5m": ret_5m,
         "ret_5m_3": ret_5m_3,
-        "dev_from_ema20_5m": (latest_close_5m - ema_20_5m) / ema_20_5m,
+        "dev_from_ema20_5m": dev_from_ema20_5m,
         "atr_pct_5m": atr_pct_5m,
     }
+    return snapshot, null_due_to_bars, null_due_to_data
 
 
 def _request_shutdown(
@@ -340,13 +399,10 @@ async def _consume_stream(
             if candle.interval != _TRIGGER_INTERVAL:
                 continue
 
-            snapshot = _compute_feature_snapshot(candle.symbol, regime_threshold=regime_threshold)
-            if snapshot is None:
-                logger.debug(
-                    "feature_snapshot_skipped",
-                    extra={"symbol": candle.symbol, "reason": "insufficient_data"},
-                )
-                continue
+            snapshot, null_due_to_bars, null_due_to_data = _compute_feature_snapshot(
+                candle,
+                regime_threshold=regime_threshold,
+            )
 
             try:
                 writer.write(snapshot)
@@ -358,13 +414,27 @@ async def _consume_stream(
                 continue
 
             logger.info(
-                "feature_snapshot",
+                "feature_snapshot_written",
                 extra={
                     "symbol": candle.symbol,
                     "close_time_ms": candle.close_time_ms,
-                    "snapshot": snapshot,
+                    "bars_count": snapshot["bars_count"],
+                    "ready": snapshot["ready"],
+                    "path": str(writer.path),
                 },
             )
+            if not all(snapshot["ready"].values()):
+                logger.info(
+                    "feature_snapshot_partial",
+                    extra={
+                        "symbol": candle.symbol,
+                        "close_time_ms": candle.close_time_ms,
+                        "bars_count": snapshot["bars_count"],
+                        "ready": snapshot["ready"],
+                        "null_due_to_insufficient_bars": null_due_to_bars,
+                        "null_due_to_data": null_due_to_data,
+                    },
+                )
 
 
 async def _run() -> int:
