@@ -41,6 +41,11 @@ class Candle:
     l: float
     c: float
     v: float
+    o_raw: str
+    h_raw: str
+    l_raw: str
+    c_raw: str
+    v_raw: str
     event_time_ms: int
 
 
@@ -114,6 +119,11 @@ def _build_closed_candle(payload: dict[str, Any]) -> Candle | None:
             l=float(kline["l"]),
             c=float(kline["c"]),
             v=float(kline["v"]),
+            o_raw=str(kline["o"]),
+            h_raw=str(kline["h"]),
+            l_raw=str(kline["l"]),
+            c_raw=str(kline["c"]),
+            v_raw=str(kline["v"]),
             event_time_ms=int(payload["E"]),
         )
     except (KeyError, TypeError, ValueError):
@@ -292,6 +302,11 @@ def _compute_feature_snapshot(
         "open_time_ms": trigger_bar.open_time_ms,
         "close_time_ms": trigger_bar.close_time_ms,
         "event_time_ms": trigger_bar.event_time_ms,
+        "o": trigger_bar.o_raw,
+        "h": trigger_bar.h_raw,
+        "l": trigger_bar.l_raw,
+        "c": trigger_bar.c_raw,
+        "v": trigger_bar.v_raw,
         "bars_count": bars_count,
         "ready": ready,
         "ema_20_1h": ema_20_1h,
