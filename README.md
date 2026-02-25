@@ -52,6 +52,24 @@ Minimal, production-grade Python skeleton for a modular AI-agent-driven quant tr
    docker compose down
    ```
 
+## Ingestor (Binance Futures WS)
+
+Local:
+
+```bash
+export INGEST_SYMBOLS="ETHUSDT,BTCUSDT"
+export INGEST_INTERVALS="5m,15m,1h"
+export INGEST_WINDOW=200
+uv run python -m llm_tradebot.services.ingestor
+```
+
+Docker:
+
+```bash
+docker compose up -d --build ingestor
+docker compose logs -f ingestor
+```
+
 ## Make targets
 
 - `make dev-api`: run API locally with reload.

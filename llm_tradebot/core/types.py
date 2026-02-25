@@ -10,3 +10,21 @@ class ServiceMeta:
     name: str
     version: str
     env: str
+
+
+@dataclass(frozen=True, slots=True)
+class BarCloseEvent:
+    """Normalized closed-candle event emitted by the ingestor."""
+
+    type: str
+    exchange: str
+    symbol: str
+    interval: str
+    open_time_ms: int
+    close_time_ms: int
+    o: str
+    h: str
+    l: str
+    c: str
+    v: str
+    event_time_ms: int
