@@ -96,6 +96,32 @@ docker compose logs -f feature_engine
 In Docker Compose, snapshots are persisted via `./data:/app/data`, so the default file is
 available on the host at `./data/feature_snapshots.jsonl`.
 
+## Router (deterministic JSONL decisions)
+
+The router tails `ROUTER_SNAPSHOT_PATH` (default `/app/data/feature_snapshots.jsonl`) and
+writes one JSON decision per line to `ROUTER_DECISION_PATH`
+(default `/app/data/router_decisions.jsonl`).
+
+Local:
+
+```bash
+export ROUTER_SNAPSHOT_PATH="./data/feature_snapshots.jsonl"
+export ROUTER_DECISION_PATH="./data/router_decisions.jsonl"
+export ROUTER_MIN_HOLD_BARS=3
+export ROUTER_DEV_ENTRY_THRESHOLD=0.002
+uv run python -m llm_tradebot.services.router
+```
+
+Docker:
+
+```bash
+docker compose up -d --build router
+docker compose logs -f router
+```
+
+In Docker Compose, router data is persisted via `./data:/app/data`, so decisions are
+available on the host at `./data/router_decisions.jsonl`.
+
 ## Make targets
 
 - `make dev-api`: run API locally with reload.

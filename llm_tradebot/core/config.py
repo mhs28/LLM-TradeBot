@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     FEATURE_WINDOW: int = 200
     REGIME_TREND_THRESHOLD: float = 0.002
     FEATURE_SNAPSHOT_PATH: str = "/app/data/feature_snapshots.jsonl"
+    ROUTER_SNAPSHOT_PATH: str = "/app/data/feature_snapshots.jsonl"
+    ROUTER_DECISION_PATH: str = "/app/data/router_decisions.jsonl"
+    ROUTER_MIN_HOLD_BARS: int = 3
+    ROUTER_DEV_ENTRY_THRESHOLD: float = 0.002
+    ROUTER_LOG_EVERY_N: int = 1
+    ROUTER_SYMBOLS: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -58,6 +64,23 @@ class Settings(BaseSettings):
         """Return normalized interval list from FEATURE_INTERVALS."""
 
         return self._split_csv(self.FEATURE_INTERVALS, transform=str.lower)
+
+    def router_symbols(self) -> tuple[str, ...]:
+        """Return normalized symbols for router decisions."""
+
+        symbols = self._split_csv(self.ROUTER_SYMBOLS, transform=str.upper)
+        if symbols:
+            return symbols
+
+        feature_symbols = self._split_csv(self.FEATURE_SYMBOLS, transform=str.upper)
+        if feature_symbols:
+            return feature_symbols
+
+        ingest_symbols = self.ingest_symbols()
+        if ingest_symbols:
+            return ingest_symbols
+
+        return ("ETHUSDT",)
 
     @staticmethod
     def _split_csv(value: str, transform: Callable[[str], str]) -> tuple[str, ...]:
