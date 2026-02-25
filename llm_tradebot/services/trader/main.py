@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import signal
 import threading
 from collections import OrderedDict, defaultdict, deque
@@ -108,9 +109,12 @@ def _as_float(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
     try:
-        return float(value)
+        numeric_value = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(numeric_value):
+        return None
+    return numeric_value
 
 
 def _normalize_target(value: Any) -> int | None:
@@ -209,28 +213,28 @@ def _cache_snapshot_price(
     payload: dict[str, Any],
     allowed_symbols: set[str],
     price_cache: PriceCache,
-) -> bool:
+) -> tuple[str, int, float] | None:
     if payload.get("type") != "feature_snapshot":
-        return False
+        return None
 
     interval_raw = payload.get("interval")
     interval = interval_raw.lower() if isinstance(interval_raw, str) else None
     if interval is not None and interval != "5m":
-        return False
+        return None
 
     symbol = _normalize_symbol(payload.get("symbol"))
     if not symbol or symbol not in allowed_symbols:
-        return False
+        return None
 
     close_time_ms = _as_int(payload.get("close_time_ms"))
     close_price = _as_float(payload.get("c"))
     if close_time_ms is None or close_price is None:
-        return False
+        return None
     if close_price <= 0.0:
-        return False
+        return None
 
     price_cache.put(symbol=symbol, close_time_ms=close_time_ms, close_price=close_price)
-    return True
+    return symbol, close_time_ms, close_price
 
 
 def _parse_decision(payload: dict[str, Any], allowed_symbols: set[str]) -> PendingDecision | None:
@@ -361,37 +365,83 @@ def _process_pending_decisions(
     fees_delta = 0.0
 
     for symbol in list(pending_by_symbol.keys()):
-        queue = pending_by_symbol[symbol]
-        state = position_by_symbol.setdefault(symbol, PositionState())
-
-        while queue:
-            decision = queue[0]
-            fill_price = price_cache.get(symbol=decision.symbol, close_time_ms=decision.close_time_ms)
-            if fill_price is None:
-                break
-
-            queue.popleft()
-            trade = _execute_trade(
-                decision=decision,
-                fill_price=fill_price,
-                fee_rate=fee_rate,
-                state=state,
-                logger=logger,
-            )
-            if trade is None:
-                continue
-
-            writer.write(trade)
-            logger.info("paper_trade", extra=trade)
-            trades_written += 1
-            realized_delta += float(trade["realized_pnl"])
-            fees_delta += float(trade["fee"])
-
-        if not queue:
-            del pending_by_symbol[symbol]
+        symbol_trades, symbol_realized, symbol_fees = _process_symbol_pending_decisions(
+            symbol=symbol,
+            pending_by_symbol=pending_by_symbol,
+            price_cache=price_cache,
+            position_by_symbol=position_by_symbol,
+            fee_rate=fee_rate,
+            writer=writer,
+            logger=logger,
+        )
+        trades_written += symbol_trades
+        realized_delta += symbol_realized
+        fees_delta += symbol_fees
 
     pending_count = sum(len(queue) for queue in pending_by_symbol.values())
     return trades_written, realized_delta, fees_delta, pending_count
+
+
+def _process_symbol_pending_decisions(
+    symbol: str,
+    pending_by_symbol: dict[str, deque[PendingDecision]],
+    price_cache: PriceCache,
+    position_by_symbol: dict[str, PositionState],
+    fee_rate: float,
+    writer: PaperTradeWriter,
+    logger: logging.Logger,
+) -> tuple[int, float, float]:
+    queue = pending_by_symbol.get(symbol)
+    if not queue:
+        return 0, 0.0, 0.0
+
+    trades_written = 0
+    realized_delta = 0.0
+    fees_delta = 0.0
+    state = position_by_symbol.setdefault(symbol, PositionState())
+    unresolved: deque[PendingDecision] = deque()
+    resolvable: list[PendingDecision] = []
+
+    while queue:
+        decision = queue.popleft()
+        fill_price = price_cache.get(symbol=decision.symbol, close_time_ms=decision.close_time_ms)
+        if fill_price is None:
+            unresolved.append(decision)
+            continue
+        resolvable.append(decision)
+
+    resolvable.sort(key=lambda decision: decision.close_time_ms)
+    for decision in resolvable:
+        fill_price = price_cache.get(symbol=decision.symbol, close_time_ms=decision.close_time_ms)
+        if fill_price is None:
+            unresolved.append(decision)
+            continue
+
+        logger.info(
+            "paper_trader_decision_resolved",
+            extra={"symbol": decision.symbol, "close_time_ms": decision.close_time_ms},
+        )
+        trade = _execute_trade(
+            decision=decision,
+            fill_price=fill_price,
+            fee_rate=fee_rate,
+            state=state,
+            logger=logger,
+        )
+        if trade is None:
+            continue
+
+        writer.write(trade)
+        logger.info("paper_trade", extra=trade)
+        trades_written += 1
+        realized_delta += float(trade["realized_pnl"])
+        fees_delta += float(trade["fee"])
+
+    if unresolved:
+        pending_by_symbol[symbol] = unresolved
+    else:
+        pending_by_symbol.pop(symbol, None)
+    return trades_written, realized_delta, fees_delta
 
 
 def main() -> int:
@@ -461,11 +511,31 @@ def main() -> int:
                 )
                 if payload is None:
                     continue
-                _cache_snapshot_price(
+                cached_price = _cache_snapshot_price(
                     payload=payload,
                     allowed_symbols=allowed_symbols,
                     price_cache=price_cache,
                 )
+                if cached_price is None:
+                    continue
+                symbol, close_time_ms, close_price = cached_price
+                logger.info(
+                    "paper_trader_price_cached",
+                    extra={"symbol": symbol, "close_time_ms": close_time_ms, "c": close_price},
+                )
+                symbol_trades, symbol_realized, symbol_fees = _process_symbol_pending_decisions(
+                    symbol=symbol,
+                    pending_by_symbol=pending_by_symbol,
+                    price_cache=price_cache,
+                    position_by_symbol=position_by_symbol,
+                    fee_rate=fee_rate,
+                    writer=writer,
+                    logger=logger,
+                )
+                if symbol_trades > 0:
+                    total_trades += symbol_trades
+                    total_realized_pnl += symbol_realized
+                    total_fees += symbol_fees
 
             decision_lines = _read_new_lines(tail=decision_tail, logger=logger)
             if decision_lines:
